@@ -43,6 +43,14 @@ internal static class LoopPolicy
 
 internal sealed class ReviewLoop(PrRef pr, LoopOptions options, Func<CancellationToken, Task<PrSnapshot>> fetch)
 {
+    /// <summary>Either the loop is done, or the next decision comes from a fresh snapshot.</summary>
+    private readonly record struct WaitResult(LoopOutcome? Outcome, LoopAction? Next)
+    {
+        public static readonly WaitResult Rescan = new(null, null);
+        public static WaitResult Done(LoopOutcome outcome) => new(outcome, null);
+        public static WaitResult Then(LoopAction action) => new(null, action);
+    }
+
     private const string FirstReviewBody =
         "Requesting an automated review of this pull request.\n\n@codex review";
 
@@ -54,11 +62,17 @@ internal sealed class ReviewLoop(PrRef pr, LoopOptions options, Func<Cancellatio
 
     public async Task<LoopOutcome> RunAsync(CancellationToken ct)
     {
+        LoopAction? pending = null;
+        int? budget = null;
+
         while (true)
         {
             var snapshot = await fetch(ct);
-            var action = LoopPolicy.Decide(snapshot);
-            Log($"state={action} head={Short(snapshot.HeadSha)} rounds={snapshot.CodexTriggerCount}/{options.MaxRounds}");
+            // Rounds already on the PR are sunk cost; this run gets MaxRounds of its own.
+            budget ??= snapshot.CodexTriggerCount + options.MaxRounds;
+            var action = pending ?? LoopPolicy.Decide(snapshot);
+            pending = null;
+            Log($"state={action} head={Short(snapshot.HeadSha)} rounds={snapshot.CodexTriggerCount}/{budget}");
 
             switch (action)
             {
@@ -70,36 +84,43 @@ internal sealed class ReviewLoop(PrRef pr, LoopOptions options, Func<Cancellatio
                     return LoopOutcome.PrClosed;
 
                 case LoopAction.TriggerCodex:
-                    if (snapshot.CodexTriggerCount >= options.MaxRounds)
-                    {
-                        Log($"Reached the {options.MaxRounds}-round limit without a clean review.");
-                        return LoopOutcome.MaxRounds;
-                    }
+                    if (OutOfRounds(snapshot, budget.Value)) return LoopOutcome.MaxRounds;
                     await PostAsync(snapshot.CodexTriggerCount == 0 ? FirstReviewBody : ReReviewBody, ct);
                     break;
 
                 case LoopAction.TriggerKiro:
+                    // Handing off to kiro implies another review round, so the cap applies here too.
+                    if (OutOfRounds(snapshot, budget.Value)) return LoopOutcome.MaxRounds;
                     await PostAsync(KiroBody, ct);
                     break;
 
                 case LoopAction.WaitForCodex:
                 {
-                    var outcome = await WaitForCodexAsync(snapshot, ct);
-                    if (outcome is not null) return outcome.Value;
+                    var wait = await WaitForCodexAsync(snapshot, ct);
+                    if (wait.Outcome is not null) return wait.Outcome.Value;
+                    pending = wait.Next;
                     break;
                 }
 
                 case LoopAction.WaitForKiro:
                 {
-                    var outcome = await WaitForKiroAsync(snapshot, ct);
-                    if (outcome is not null) return outcome.Value;
+                    var wait = await WaitForKiroAsync(snapshot, ct);
+                    if (wait.Outcome is not null) return wait.Outcome.Value;
+                    pending = wait.Next;
                     break;
                 }
             }
         }
     }
 
-    private async Task<LoopOutcome?> WaitForCodexAsync(PrSnapshot snapshot, CancellationToken ct)
+    private bool OutOfRounds(PrSnapshot snapshot, int budget)
+    {
+        if (snapshot.CodexTriggerCount < budget) return false;
+        Log($"Reached the {options.MaxRounds}-round limit for this run without a clean review.");
+        return true;
+    }
+
+    private async Task<WaitResult> WaitForCodexAsync(PrSnapshot snapshot, CancellationToken ct)
     {
         var since = snapshot.LastCodexTrigger?.At ?? DateTimeOffset.UtcNow;
         var deadline = DateTimeOffset.UtcNow + options.RoundTimeout;
@@ -113,13 +134,14 @@ internal sealed class ReviewLoop(PrRef pr, LoopOptions options, Func<Cancellatio
                 await Task.Delay(options.PollInterval, ct);
                 continue;
             }
-            if (!current.IsOpen) return LoopOutcome.PrClosed;
+            if (!current.IsOpen) return WaitResult.Done(LoopOutcome.PrClosed);
 
             var result = current.LastCodexResult;
             if (result is not null && result.At > since)
             {
                 Log(result.IsClean ? "Codex reported no major issues." : "Codex reported findings.");
-                return null;
+                // A fresh result is a real timeline signal, so the policy can take it from here.
+                return WaitResult.Rescan;
             }
 
             Log($"waiting for Codex, {Remaining(deadline)} left");
@@ -127,10 +149,10 @@ internal sealed class ReviewLoop(PrRef pr, LoopOptions options, Func<Cancellatio
         }
 
         Log($"No Codex result within {Fmt(options.RoundTimeout)}.");
-        return LoopOutcome.Timeout;
+        return WaitResult.Done(LoopOutcome.Timeout);
     }
 
-    private async Task<LoopOutcome?> WaitForKiroAsync(PrSnapshot snapshot, CancellationToken ct)
+    private async Task<WaitResult> WaitForKiroAsync(PrSnapshot snapshot, CancellationToken ct)
     {
         var since = snapshot.LastKiroTrigger?.At ?? DateTimeOffset.UtcNow;
         var deadline = DateTimeOffset.UtcNow + options.KiroTimeout;
@@ -141,11 +163,11 @@ internal sealed class ReviewLoop(PrRef pr, LoopOptions options, Func<Cancellatio
             var current = await PollAsync(ct);
             if (current is null)
             {
-                if (DateTimeOffset.UtcNow >= deadline) return LoopOutcome.KiroStalled;
+                if (DateTimeOffset.UtcNow >= deadline) return WaitResult.Done(LoopOutcome.KiroStalled);
                 await Task.Delay(options.PollInterval, ct);
                 continue;
             }
-            if (!current.IsOpen) return LoopOutcome.PrClosed;
+            if (!current.IsOpen) return WaitResult.Done(LoopOutcome.PrClosed);
 
             var commitAt = current.LastCommitAt;
             if (commitAt > since)
@@ -154,7 +176,8 @@ internal sealed class ReviewLoop(PrRef pr, LoopOptions options, Func<Cancellatio
                 if (quiet >= options.SilenceWindow)
                 {
                     Log($"New commits settled ({Fmt(quiet)} quiet), requesting the next review.");
-                    return null;
+                    // Commits are not timeline signals, so name the next action instead of re-deriving it.
+                    return WaitResult.Then(LoopAction.TriggerCodex);
                 }
                 Log($"New commit {Fmt(quiet)} ago, waiting for {Fmt(options.SilenceWindow)} of quiet");
             }
@@ -163,7 +186,7 @@ internal sealed class ReviewLoop(PrRef pr, LoopOptions options, Func<Cancellatio
                 if (DateTimeOffset.UtcNow >= deadline)
                 {
                     Log($"No commit from kiro-agent within {Fmt(options.KiroTimeout)}.");
-                    return LoopOutcome.KiroStalled;
+                    return WaitResult.Done(LoopOutcome.KiroStalled);
                 }
                 Log($"waiting for kiro-agent commits, {Remaining(deadline)} left");
             }

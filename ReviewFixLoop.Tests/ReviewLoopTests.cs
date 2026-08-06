@@ -66,12 +66,29 @@ public class ReviewLoopTests
         Assert.Equal(LoopOutcome.Approved, await loop.RunAsync(CancellationToken.None));
     }
 
+    /// <summary>Budget is baselined on the first snapshot, so a count already past it still stops.</summary>
     [Fact]
     public async Task RoundLimitStopsBeforePosting()
     {
-        var loop = new ReviewLoop(Pr, Fast(maxRounds: 2), _ => Task.FromResult(Snapshot(codexTriggerCount: 2)));
+        var calls = 0;
+        var loop = new ReviewLoop(Pr, Fast(maxRounds: 0), _ =>
+        {
+            calls++;
+            return Task.FromResult(Snapshot(codexTriggerCount: 2));
+        });
 
         Assert.Equal(LoopOutcome.MaxRounds, await loop.RunAsync(CancellationToken.None));
+        Assert.Equal(1, calls);
+    }
+
+    /// <summary>A PR that already burned rounds still gets a full budget instead of exiting at once.</summary>
+    [Fact]
+    public async Task ExistingRoundsDoNotStopTheRunImmediately()
+    {
+        var options = Fast(maxRounds: 5) with { DryRun = true };
+        var loop = new ReviewLoop(Pr, options, _ => Task.FromResult(Snapshot(codexTriggerCount: 9)));
+
+        await Assert.ThrowsAsync<DryRunStop>(() => loop.RunAsync(CancellationToken.None));
     }
 
     [Fact]

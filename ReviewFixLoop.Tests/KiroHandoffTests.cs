@@ -49,7 +49,7 @@ public class KiroHandoffTests
         var kiro = new TimelineSignal(SignalKind.KiroTrigger, now.AddMinutes(-10), "/kiro all");
         var calls = 0;
 
-        var loop = new ReviewLoop(Pr, Fast(maxRounds: 2), _ =>
+        var loop = new ReviewLoop(Pr, Fast(maxRounds: 0), _ =>
         {
             calls++;
             Assert.True(calls < 50, "loop spun instead of reporting the round limit");

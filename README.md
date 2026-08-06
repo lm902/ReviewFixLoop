@@ -47,7 +47,7 @@ All durations are in minutes.
 | `--initial-delay` | 5 | Wait before the first poll after a trigger comment |
 | `--poll-interval` | 2 | Interval between polls |
 | `--silence-window` | 3 | Quiet time after a new commit before requesting review |
-| `--max-rounds` | 5 | Maximum `@codex review` rounds |
+| `--max-rounds` | 5 | Extra `@codex review` rounds this run may add. `0` posts nothing |
 | `--round-timeout` | 45 | Give up waiting for a Codex result |
 | `--kiro-timeout` | 30 | Give up waiting for kiro-agent commits |
 | `--rate-limit-cap` | 15 | Longest single wait for a GitHub rate limit reset |
@@ -90,8 +90,16 @@ Decision table, evaluated on a fresh snapshot each iteration:
 | Newest signal is `@codex review` | wait for a Codex result |
 | Newest signal is `/kiro all` | wait for commits, then the silence window |
 
+`--max-rounds` is a budget for this run, not an absolute ceiling. The `@codex review`
+comments already on the PR are counted once at startup and the budget is added on top, so
+picking up a PR that has been through nine rounds still gets five more rather than exiting
+immediately. It is checked before posting, so a review already in flight is still waited
+out and reported; the run stops with exit 8 only when it would have to post another
+`@codex review` or `/kiro all`. Use `--max-rounds 0` to watch a PR without posting
+anything.
+
 The approval check runs before the round limit, so a PR that is already clean exits 0
-even if it burned more rounds than `--max-rounds` allows.
+regardless of how many rounds it took.
 
 Approval is commit-scoped: a clean review earned at an older commit does not end the
 loop. Codex results are collected from all three endpoints that can carry them —

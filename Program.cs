@@ -98,7 +98,8 @@ static void PrintUsage() => Console.WriteLine("""
       --initial-delay <n>      Wait before the first poll after a trigger. Default 5.
       --poll-interval <n>      Interval between polls. Default 2.
       --silence-window <n>     Quiet time after a new commit before requesting review. Default 3.
-      --max-rounds <n>         Maximum @codex review rounds. Default 5.
+      --max-rounds <n>         Extra @codex review rounds this run may add. Default 5.
+                               Counted on top of rounds already on the PR. 0 posts nothing.
       --round-timeout <n>      Give up waiting for a Codex result. Default 45.
       --kiro-timeout <n>       Give up waiting for kiro-agent commits. Default 30.
       --rate-limit-cap <n>     Longest single wait for a GitHub rate limit reset. Default 15.
@@ -140,7 +141,7 @@ namespace ReviewFixLoop
                     case "--round-timeout": roundTimeout = Minutes(Next(args, ref i), a); break;
                     case "--kiro-timeout": kiroTimeout = Minutes(Next(args, ref i), a); break;
                     case "--rate-limit-cap": rateLimitCap = Minutes(Next(args, ref i), a); break;
-                    case "--max-rounds": maxRounds = Count(Next(args, ref i), a); break;
+                    case "--max-rounds": maxRounds = Rounds(Next(args, ref i), a); break;
                     case "--dry-run": dryRun = true; break;
                     case "--verbose": verbose = true; break;
                     default:
@@ -170,8 +171,9 @@ namespace ReviewFixLoop
         private static double Minutes(string value, string option) =>
             double.TryParse(value, out var m) && m >= 0 ? m : throw new CliException($"'{option}' needs a non-negative number of minutes.");
 
-        private static int Count(string value, string option) =>
-            int.TryParse(value, out var n) && n > 0 ? n : throw new CliException($"'{option}' needs a positive integer.");
+        // Zero is valid: observe the PR without posting anything new.
+        private static int Rounds(string value, string option) =>
+            int.TryParse(value, out var n) && n >= 0 ? n : throw new CliException($"'{option}' needs a non-negative integer.");
     }
 
     internal sealed class CliException(string message) : Exception(message);
