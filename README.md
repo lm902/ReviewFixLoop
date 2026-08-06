@@ -5,8 +5,21 @@ loop until Codex reports no major issues for the current head commit.
 
 ## Requirements
 
-- .NET 10 SDK
+To run `reviewfixloop.exe`:
+
 - [GitHub CLI](https://cli.github.com/) authenticated via `gh auth login`
+
+The Native AOT build is self-contained, so no .NET runtime or SDK is needed to run it.
+The .NET 10 SDK is only required to build from source.
+
+Both agents must be connected to GitHub, otherwise the loop posts its comments and then
+waits forever because nothing responds:
+
+- **Codex** — sign in to the repository at
+  <https://chatgpt.com/codex/cloud/settings/connectors>. Without it, `@codex review` is
+  never picked up and the loop exits with code 6 (`--round-timeout`).
+- **Kiro** — sign in to GitHub at <https://app.kiro.dev/settings/agent>. Without it,
+  `/kiro all` produces no commits and the loop exits with code 7 (`--kiro-timeout`).
 
 ## Usage
 
@@ -71,13 +84,13 @@ Decision table, evaluated on a fresh snapshot each iteration:
 | PR not open | exit `PrClosed` |
 | Clean result whose `Reviewed commit` matches head | exit `Approved` |
 | No signals and PR body does not mention `@codex` | post `@codex review` |
-
-The approval check runs before the round limit, so a PR that is already clean exits 0
-even if it burned more rounds than `--max-rounds` allows.
 | Newest signal is a clean result on an older commit | post `@codex review` |
 | Newest signal is a result with findings | post `/kiro all` |
 | Newest signal is `@codex review` | wait for a Codex result |
 | Newest signal is `/kiro all` | wait for commits, then the silence window |
+
+The approval check runs before the round limit, so a PR that is already clean exits 0
+even if it burned more rounds than `--max-rounds` allows.
 
 Approval is commit-scoped: a clean review earned at an older commit does not end the
 loop. Codex results are collected from all three endpoints that can carry them —
