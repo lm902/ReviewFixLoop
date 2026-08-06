@@ -11,15 +11,17 @@ loop until Codex reports no major issues for the current head commit.
 ## Usage
 
 ```pwsh
-dotnet run -- <pr> [options]
+reviewfixloop [pr] [options]
 ```
 
-`<pr>` accepts a PR URL, `OWNER/REPO#123`, or a bare number (with `--repo OWNER/REPO`,
-or run inside the repository).
+`[pr]` accepts a PR URL, `OWNER/REPO#123`, or a bare number. It is optional: when omitted,
+the PR for the current branch is used, falling back to your single open PR in the
+repository. If several of your PRs are open, they are listed so you can pick one.
 
 ```pwsh
-dotnet run -- https://github.com/OWNER/REPO/pull/123
-dotnet run -- 123 --repo OWNER/REPO --dry-run
+reviewfixloop                                             # discover the PR
+reviewfixloop https://github.com/OWNER/REPO/pull/123
+reviewfixloop 123 --repo OWNER/REPO --dry-run
 ```
 
 ### Options
@@ -28,7 +30,7 @@ All durations are in minutes.
 
 | Option | Default | Meaning |
 | --- | --- | --- |
-| `--repo OWNER/REPO` | current repo | Repository when `<pr>` is a bare number |
+| `--repo OWNER/REPO` | current repo | Repository to look in |
 | `--initial-delay` | 5 | Wait before the first poll after a trigger comment |
 | `--poll-interval` | 2 | Interval between polls |
 | `--silence-window` | 3 | Quiet time after a new commit before requesting review |
@@ -45,7 +47,7 @@ All durations are in minutes.
 | 1 | Unexpected error |
 | 2 | `gh` not installed |
 | 3 | `gh` not authenticated |
-| 4 | Bad arguments or PR could not be read |
+| 4 | Bad arguments, or the PR could not be read or discovered |
 | 5 | PR is closed or merged |
 | 6 | No Codex result within `--round-timeout` |
 | 7 | No kiro-agent commit within `--kiro-timeout` |
@@ -69,6 +71,9 @@ Decision table, evaluated on a fresh snapshot each iteration:
 | PR not open | exit `PrClosed` |
 | Clean result whose `Reviewed commit` matches head | exit `Approved` |
 | No signals and PR body does not mention `@codex` | post `@codex review` |
+
+The approval check runs before the round limit, so a PR that is already clean exits 0
+even if it burned more rounds than `--max-rounds` allows.
 | Newest signal is a clean result on an older commit | post `@codex review` |
 | Newest signal is a result with findings | post `/kiro all` |
 | Newest signal is `@codex review` | wait for a Codex result |
@@ -81,6 +86,23 @@ loop. Codex results are collected from all three endpoints that can carry them â
 Waiting happens in the foreground with a log line per poll. The first poll after a
 trigger is delayed until `trigger time + --initial-delay`; if that moment already
 passed the loop polls immediately.
+
+## Publish
+
+Native AOT produces a self-contained single-file executable with no runtime dependency.
+It needs the MSVC linker (Visual Studio "Desktop development with C++" workload or the
+standalone Build Tools with `VC.Tools.x86.x64` plus a Windows SDK).
+
+```pwsh
+dotnet publish -r win-x64 -c Release -o publish
+```
+
+Without the MSVC linker, fall back to a trimmed self-contained single file. It still needs
+no installed runtime, but starts slower and is larger:
+
+```pwsh
+dotnet publish -r win-x64 -c Release -p:PublishAot=false -o publish
+```
 
 ## Tests
 

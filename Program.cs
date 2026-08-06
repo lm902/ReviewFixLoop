@@ -10,10 +10,10 @@ const int ExitTimeout = 6;
 const int ExitKiroStalled = 7;
 const int ExitMaxRounds = 8;
 
-if (args.Length == 0 || args[0] is "-h" or "--help")
+if (args.Any(a => a is "-h" or "--help"))
 {
     PrintUsage();
-    return args.Length == 0 ? ExitBadArgs : ExitApproved;
+    return ExitApproved;
 }
 
 using var cts = new CancellationTokenSource();
@@ -85,12 +85,14 @@ catch (Exception ex)
 }
 
 static void PrintUsage() => Console.WriteLine("""
-    reviewfixloop <pr> [options]
+    reviewfixloop [pr] [options]
 
-      <pr>                     PR URL, OWNER/REPO#123, or a number.
+      [pr]                     PR URL, OWNER/REPO#123, or a number. When omitted, the PR
+                               for the current branch is used, falling back to your single
+                               open PR in the repository.
 
     Options (durations in minutes):
-      --repo OWNER/REPO        Repository when <pr> is a bare number.
+      --repo OWNER/REPO        Repository to look in. Defaults to the current git repo.
       --initial-delay <n>      Wait before the first poll after a trigger. Default 5.
       --poll-interval <n>      Interval between polls. Default 2.
       --silence-window <n>     Quiet time after a new commit before requesting review. Default 3.
@@ -107,7 +109,7 @@ static void PrintUsage() => Console.WriteLine("""
 
 namespace ReviewFixLoop
 {
-    internal sealed record CliOptions(string PrArg, string? Repo, LoopOptions Options)
+    internal sealed record CliOptions(string? PrArg, string? Repo, LoopOptions Options)
     {
         public static CliOptions Parse(string[] args)
         {
@@ -144,7 +146,6 @@ namespace ReviewFixLoop
                 }
             }
 
-            if (prArg is null) throw new CliException("A PR reference is required.");
             if (pollInterval <= 0) throw new CliException("--poll-interval must be greater than 0.");
 
             return new CliOptions(prArg, repo, new LoopOptions(

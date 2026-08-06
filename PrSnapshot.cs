@@ -1,10 +1,12 @@
-using System.Text.Json.Serialization;
+using System.Text.Json;
 using System.Text.RegularExpressions;
 
 namespace ReviewFixLoop;
 
 internal sealed record PrRef(string Owner, string Repo, int Number)
 {
+    public string Slug => $"{Owner}/{Repo}";
+
     public override string ToString() => $"{Owner}/{Repo}#{Number}";
 }
 
@@ -36,8 +38,11 @@ internal sealed record PrSnapshot(
 
 internal static partial class PrLookup
 {
-    public static async Task<PrRef> ResolveAsync(string arg, string? repoOption, CancellationToken ct)
+    public static async Task<PrRef> ResolveAsync(string? arg, string? repoOption, CancellationToken ct)
     {
+        if (string.IsNullOrWhiteSpace(arg))
+            return await DiscoverAsync(repoOption, ct);
+
         var url = PrUrlRegex().Match(arg);
         if (url.Success)
             return new PrRef(url.Groups[1].Value, url.Groups[2].Value, int.Parse(url.Groups[3].Value));
@@ -49,12 +54,59 @@ internal static partial class PrLookup
         if (!int.TryParse(arg.TrimStart('#'), out var number) || number <= 0)
             throw new GhException($"Cannot parse PR reference '{arg}'. Use a URL, OWNER/REPO#123, or a number.");
 
+        var (owner, repo) = await ResolveRepoAsync(repoOption, ct);
+        return new PrRef(owner, repo, number);
+    }
+
+    /// <summary>Finds the PR for the current branch, else the single open PR authored by the current user.</summary>
+    private static async Task<PrRef> DiscoverAsync(string? repoOption, CancellationToken ct)
+    {
+        var (owner, repo) = await ResolveRepoAsync(repoOption, ct);
+        var slug = $"{owner}/{repo}";
+
+        var branch = await Gh.RunAsync(
+            ["pr", "view", "--repo", slug, "--json", "number", "--jq", ".number"], ct);
+        if (branch.Ok && int.TryParse(branch.StdOut, out var current))
+        {
+            Console.WriteLine($"No PR given; using the PR for the current branch: {slug}#{current}");
+            return new PrRef(owner, repo, current);
+        }
+
+        var mine = await ListOpenAsync(slug, ct);
+        if (mine.Count == 1)
+        {
+            Console.WriteLine($"No PR given; using your only open PR: {slug}#{mine[0].Number} ({mine[0].Title})");
+            return new PrRef(owner, repo, mine[0].Number);
+        }
+
+        if (mine.Count > 1)
+            throw new GhException(
+                $"Found {mine.Count} open PRs authored by you in {slug}. Pass one explicitly:{Environment.NewLine}"
+                + string.Join(Environment.NewLine, mine.Select(p => $"  #{p.Number}  {p.Title}")));
+
+        throw new GhException($"No open PR authored by you in {slug}. Open a PR first, or pass a PR URL or number.");
+    }
+
+    private static async Task<List<GhPrListItem>> ListOpenAsync(string slug, CancellationToken ct)
+    {
+        var r = await Gh.RunAsync(
+        [
+            "pr", "list", "--repo", slug, "--state", "open", "--author", "@me",
+            "--limit", "50", "--json", "number,title,url,headRefName",
+        ], ct);
+        if (!r.Ok)
+            throw new GhException($"Cannot list PRs in {slug}: {(string.IsNullOrEmpty(r.StdErr) ? r.StdOut : r.StdErr)}");
+
+        return JsonSerializer.Deserialize(r.StdOut, GhJson.Default.ListGhPrListItem) ?? [];
+    }
+
+    private static async Task<(string Owner, string Repo)> ResolveRepoAsync(string? repoOption, CancellationToken ct)
+    {
         var repo = repoOption ?? await CurrentRepoAsync(ct);
         var parts = repo.Split('/');
-        if (parts.Length != 2)
-            throw new GhException($"Invalid --repo value '{repo}'. Expected OWNER/REPO.");
-
-        return new PrRef(parts[0], parts[1], number);
+        if (parts.Length != 2 || parts.Any(string.IsNullOrWhiteSpace))
+            throw new GhException($"Invalid repository '{repo}'. Expected OWNER/REPO.");
+        return (parts[0], parts[1]);
     }
 
     private static async Task<string> CurrentRepoAsync(CancellationToken ct)
@@ -79,14 +131,18 @@ internal static class PrSnapshotFetcher
         var view = await ViewAsync(pr, ct);
 
         // Codex results can land on any of three endpoints; all must be merged.
-        var issueComments = await Gh.ApiAsync<List<List<IssueComment>>>(
-            $"repos/{pr.Owner}/{pr.Repo}/issues/{pr.Number}/comments?per_page=100", paginate: true, ct);
-        var reviews = await Gh.ApiAsync<List<List<Review>>>(
-            $"repos/{pr.Owner}/{pr.Repo}/pulls/{pr.Number}/reviews?per_page=100", paginate: true, ct);
-        var reviewComments = await Gh.ApiAsync<List<List<IssueComment>>>(
-            $"repos/{pr.Owner}/{pr.Repo}/pulls/{pr.Number}/comments?per_page=100", paginate: true, ct);
-        var commits = await Gh.ApiAsync<List<List<Commit>>>(
-            $"repos/{pr.Owner}/{pr.Repo}/pulls/{pr.Number}/commits?per_page=100", paginate: true, ct);
+        var issueComments = await Gh.ApiAsync(
+            $"repos/{pr.Owner}/{pr.Repo}/issues/{pr.Number}/comments?per_page=100",
+            GhJson.Default.ListListGhIssueComment, paginate: true, ct);
+        var reviews = await Gh.ApiAsync(
+            $"repos/{pr.Owner}/{pr.Repo}/pulls/{pr.Number}/reviews?per_page=100",
+            GhJson.Default.ListListGhReview, paginate: true, ct);
+        var reviewComments = await Gh.ApiAsync(
+            $"repos/{pr.Owner}/{pr.Repo}/pulls/{pr.Number}/comments?per_page=100",
+            GhJson.Default.ListListGhIssueComment, paginate: true, ct);
+        var commits = await Gh.ApiAsync(
+            $"repos/{pr.Owner}/{pr.Repo}/pulls/{pr.Number}/commits?per_page=100",
+            GhJson.Default.ListListGhCommit, paginate: true, ct);
 
         var entries = Flatten(issueComments).Select(c => (c.User?.Login, c.Body, c.CreatedAt))
             .Concat(Flatten(reviewComments).Select(c => (c.User?.Login, c.Body, c.CreatedAt)))
@@ -130,38 +186,18 @@ internal static class PrSnapshotFetcher
     private static IEnumerable<T> Flatten<T>(List<List<T>>? pages) =>
         pages?.SelectMany(p => p ?? []) ?? [];
 
-    private static async Task<PrView> ViewAsync(PrRef pr, CancellationToken ct)
+    private static async Task<GhPrView> ViewAsync(PrRef pr, CancellationToken ct)
     {
         var r = await Gh.RunAsync(
         [
             "pr", "view", pr.Number.ToString(),
-            "--repo", $"{pr.Owner}/{pr.Repo}",
+            "--repo", pr.Slug,
             "--json", "number,state,headRefOid,body,url,isDraft",
         ], ct);
         if (!r.Ok)
             throw new GhException($"Cannot read {pr}: {(string.IsNullOrEmpty(r.StdErr) ? r.StdOut : r.StdErr)}");
 
-        return System.Text.Json.JsonSerializer.Deserialize<PrView>(r.StdOut, Gh.Json)
+        return JsonSerializer.Deserialize(r.StdOut, GhJson.Default.GhPrView)
                ?? throw new GhException($"Empty response for {pr}.");
     }
-
-    private sealed record PrView(int Number, string? State, string? HeadRefOid, string? Body, string? Url, bool IsDraft);
-
-    private sealed record User(string? Login);
-
-    private sealed record IssueComment(
-        string? Body,
-        User? User,
-        [property: JsonPropertyName("created_at")] DateTimeOffset CreatedAt);
-
-    private sealed record Review(
-        string? Body,
-        User? User,
-        [property: JsonPropertyName("submitted_at")] DateTimeOffset? SubmittedAt);
-
-    private sealed record Commit([property: JsonPropertyName("commit")] CommitDetail? Detail);
-
-    private sealed record CommitDetail(GitSignature? Author, GitSignature? Committer);
-
-    private sealed record GitSignature(DateTimeOffset? Date);
 }

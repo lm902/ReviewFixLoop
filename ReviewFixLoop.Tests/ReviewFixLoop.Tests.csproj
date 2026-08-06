@@ -19,6 +19,7 @@
     <Compile Include="../ReviewLoop.cs" Link="ReviewLoop.cs" />
     <Compile Include="../PrSnapshot.cs" Link="PrSnapshot.cs" />
     <Compile Include="../Gh.cs" Link="Gh.cs" />
+    <Compile Include="../GhJson.cs" Link="GhJson.cs" />
   </ItemGroup>
 
 </Project>

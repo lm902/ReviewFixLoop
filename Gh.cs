@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Serialization.Metadata;
 
 namespace ReviewFixLoop;
 
@@ -12,11 +13,6 @@ internal sealed record GhResult(int ExitCode, string StdOut, string StdErr)
 /// <summary>Thin wrapper over the `gh` CLI. Arguments are passed as a list, never string-interpolated.</summary>
 internal static class Gh
 {
-    public static readonly JsonSerializerOptions Json = new()
-    {
-        PropertyNameCaseInsensitive = true,
-    };
-
     public static async Task<GhResult> RunAsync(IEnumerable<string> args, CancellationToken ct = default)
     {
         var psi = new ProcessStartInfo("gh")
@@ -45,7 +41,7 @@ internal static class Gh
         return new GhResult(proc.ExitCode, (await stdout).Trim(), (await stderr).Trim());
     }
 
-    public static async Task<T?> ApiAsync<T>(string endpoint, bool paginate, CancellationToken ct = default)
+    public static async Task<T?> ApiAsync<T>(string endpoint, JsonTypeInfo<T> typeInfo, bool paginate, CancellationToken ct = default)
     {
         var args = new List<string> { "api", endpoint, "-H", "Accept: application/vnd.github+json" };
         if (paginate) args.AddRange(["--paginate", "--slurp"]);
@@ -53,7 +49,7 @@ internal static class Gh
         var r = await RunAsync(args, ct);
         if (!r.Ok) throw new GhException($"gh api {endpoint} failed: {Describe(r)}");
 
-        return JsonSerializer.Deserialize<T>(r.StdOut, Json);
+        return JsonSerializer.Deserialize(r.StdOut, typeInfo);
     }
 
     /// <summary>Body goes through a temp file so multi-line markdown survives argument handling.</summary>
