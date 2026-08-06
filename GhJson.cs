@@ -26,8 +26,13 @@ internal sealed record GhPrView(int Number, string? State, string? HeadRefOid, s
 
 internal sealed record GhPrListItem(int Number, string? Title, string? Url, string? HeadRefName);
 
+internal sealed record GhRateLimit(GhRateLimitCore? Rate);
+
+internal sealed record GhRateLimitCore(int Limit, int Remaining, long Reset);
+
 [JsonSourceGenerationOptions(PropertyNameCaseInsensitive = true)]
 [JsonSerializable(typeof(GhPrView))]
+[JsonSerializable(typeof(GhRateLimit))]
 [JsonSerializable(typeof(List<GhPrListItem>))]
 [JsonSerializable(typeof(List<List<GhIssueComment>>))]
 [JsonSerializable(typeof(List<List<GhReview>>))]

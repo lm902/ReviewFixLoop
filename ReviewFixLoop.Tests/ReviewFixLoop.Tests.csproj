@@ -20,6 +20,7 @@
     <Compile Include="../PrSnapshot.cs" Link="PrSnapshot.cs" />
     <Compile Include="../Gh.cs" Link="Gh.cs" />
     <Compile Include="../GhJson.cs" Link="GhJson.cs" />
+    <Compile Include="../GhRetry.cs" Link="GhRetry.cs" />
   </ItemGroup>
 
 </Project>

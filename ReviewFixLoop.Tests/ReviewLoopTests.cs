@@ -97,4 +97,36 @@ public class ReviewLoopTests
 
         await Assert.ThrowsAsync<DryRunStop>(() => loop.RunAsync(CancellationToken.None));
     }
+
+    [Fact]
+    public async Task PollFailureDoesNotAbortTheWait()
+    {
+        var trigger = new TimelineSignal(SignalKind.CodexTrigger, DateTimeOffset.UtcNow, "@codex review");
+        var calls = 0;
+        var loop = new ReviewLoop(Pr, Fast(roundTimeoutMs: 5000), _ =>
+        {
+            calls++;
+            if (calls is 2 or 3) throw new GhException("gh api failed: 502 Bad Gateway");
+            var result = calls >= 4 ? CleanResult(trigger.At.AddSeconds(1)) : null;
+            return Task.FromResult(Snapshot(result: result, codexTrigger: trigger));
+        });
+
+        Assert.Equal(LoopOutcome.Approved, await loop.RunAsync(CancellationToken.None));
+        Assert.True(calls >= 4);
+    }
+
+    [Fact]
+    public async Task PersistentPollFailureStillTimesOut()
+    {
+        var trigger = new TimelineSignal(SignalKind.CodexTrigger, DateTimeOffset.UtcNow, "@codex review");
+        var calls = 0;
+        var loop = new ReviewLoop(Pr, Fast(), _ =>
+        {
+            calls++;
+            if (calls == 1) return Task.FromResult(Snapshot(codexTrigger: trigger));
+            throw new GhException("gh api failed: 502 Bad Gateway");
+        });
+
+        Assert.Equal(LoopOutcome.Timeout, await loop.RunAsync(CancellationToken.None));
+    }
 }

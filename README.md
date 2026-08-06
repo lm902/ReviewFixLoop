@@ -50,6 +50,7 @@ All durations are in minutes.
 | `--max-rounds` | 5 | Maximum `@codex review` rounds |
 | `--round-timeout` | 45 | Give up waiting for a Codex result |
 | `--kiro-timeout` | 30 | Give up waiting for kiro-agent commits |
+| `--rate-limit-cap` | 15 | Longest single wait for a GitHub rate limit reset |
 | `--dry-run` | off | Print the comment that would be posted, post nothing |
 
 ### Exit codes
@@ -99,6 +100,32 @@ loop. Codex results are collected from all three endpoints that can carry them â
 Waiting happens in the foreground with a log line per poll. The first poll after a
 trigger is delayed until `trigger time + --initial-delay`; if that moment already
 passed the loop polls immediately.
+
+## Failure handling
+
+A run polls GitHub for tens of minutes, so a single bad response must not end it.
+
+**Retries.** Every `gh` call is classified and retried up to 5 times:
+
+| Failure | Behavior |
+| --- | --- |
+| 408, 500, 502, 503, 504, 520, 522, 524 | Retry with 2s / 5s / 15s / 40s backoff |
+| Connection errors (DNS, reset, TLS, timeout) | Same backoff |
+| 429, or 403 whose message mentions a rate limit | Query `rate_limit` and sleep until `reset`, capped by `--rate-limit-cap` |
+| Other 4xx (401, 404, 422, plain 403) | Fail immediately, no retry |
+
+A plain 403 is a permission error, not throttling, so it is not retried. The rate-limit
+wait reads GitHub's own `reset` timestamp rather than guessing, adds a 2-second margin, and
+is clamped so a skewed clock cannot stall the run. If `rate_limit` itself is unreachable,
+it falls back to 60 seconds.
+
+**Posting comments** only retries rate limits. A rate-limited request never reached the
+resource, but a lost response to a `POST` may have, and retrying that could post the same
+comment twice.
+
+**Polling** tolerates failure: if a snapshot fetch fails even after retries, the loop logs
+it and tries again on the next poll. Only the surrounding `--round-timeout` or
+`--kiro-timeout` can end the wait.
 
 ## Publish
 

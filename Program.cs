@@ -27,6 +27,8 @@ Console.CancelKeyPress += (_, e) =>
 try
 {
     var cli = CliOptions.Parse(args);
+    Gh.Log = m => Console.WriteLine($"[{DateTime.Now:HH:mm:ss}] {m}");
+    Gh.RateLimitCap = cli.RateLimitCap;
 
     if (!await Gh.IsInstalledAsync(cts.Token))
     {
@@ -99,6 +101,7 @@ static void PrintUsage() => Console.WriteLine("""
       --max-rounds <n>         Maximum @codex review rounds. Default 5.
       --round-timeout <n>      Give up waiting for a Codex result. Default 45.
       --kiro-timeout <n>       Give up waiting for kiro-agent commits. Default 30.
+      --rate-limit-cap <n>     Longest single wait for a GitHub rate limit reset. Default 15.
       --dry-run                Print the comment that would be posted, post nothing.
       --verbose                Verbose logging.
       -h, --help               Show this help.
@@ -109,12 +112,13 @@ static void PrintUsage() => Console.WriteLine("""
 
 namespace ReviewFixLoop
 {
-    internal sealed record CliOptions(string? PrArg, string? Repo, LoopOptions Options)
+    internal sealed record CliOptions(string? PrArg, string? Repo, TimeSpan RateLimitCap, LoopOptions Options)
     {
         public static CliOptions Parse(string[] args)
         {
             string? prArg = null;
             string? repo = null;
+            var rateLimitCap = 15.0;
             var initialDelay = 5.0;
             var pollInterval = 2.0;
             var silenceWindow = 3.0;
@@ -135,6 +139,7 @@ namespace ReviewFixLoop
                     case "--silence-window": silenceWindow = Minutes(Next(args, ref i), a); break;
                     case "--round-timeout": roundTimeout = Minutes(Next(args, ref i), a); break;
                     case "--kiro-timeout": kiroTimeout = Minutes(Next(args, ref i), a); break;
+                    case "--rate-limit-cap": rateLimitCap = Minutes(Next(args, ref i), a); break;
                     case "--max-rounds": maxRounds = Count(Next(args, ref i), a); break;
                     case "--dry-run": dryRun = true; break;
                     case "--verbose": verbose = true; break;
@@ -148,7 +153,7 @@ namespace ReviewFixLoop
 
             if (pollInterval <= 0) throw new CliException("--poll-interval must be greater than 0.");
 
-            return new CliOptions(prArg, repo, new LoopOptions(
+            return new CliOptions(prArg, repo, TimeSpan.FromMinutes(rateLimitCap), new LoopOptions(
                 TimeSpan.FromMinutes(initialDelay),
                 TimeSpan.FromMinutes(pollInterval),
                 TimeSpan.FromMinutes(silenceWindow),

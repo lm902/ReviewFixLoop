@@ -64,8 +64,8 @@ internal static partial class PrLookup
         var (owner, repo) = await ResolveRepoAsync(repoOption, ct);
         var slug = $"{owner}/{repo}";
 
-        var branch = await Gh.RunAsync(
-            ["pr", "view", "--repo", slug, "--json", "number", "--jq", ".number"], ct);
+        var branch = await Gh.RunWithRetryAsync(
+            ["pr", "view", "--repo", slug, "--json", "number", "--jq", ".number"], rateLimitOnly: false, ct);
         if (branch.Ok && int.TryParse(branch.StdOut, out var current))
         {
             Console.WriteLine($"No PR given; using the PR for the current branch: {slug}#{current}");
@@ -89,11 +89,11 @@ internal static partial class PrLookup
 
     private static async Task<List<GhPrListItem>> ListOpenAsync(string slug, CancellationToken ct)
     {
-        var r = await Gh.RunAsync(
+        var r = await Gh.RunWithRetryAsync(
         [
             "pr", "list", "--repo", slug, "--state", "open", "--author", "@me",
             "--limit", "50", "--json", "number,title,url,headRefName",
-        ], ct);
+        ], rateLimitOnly: false, ct);
         if (!r.Ok)
             throw new GhException($"Cannot list PRs in {slug}: {(string.IsNullOrEmpty(r.StdErr) ? r.StdOut : r.StdErr)}");
 
@@ -111,7 +111,7 @@ internal static partial class PrLookup
 
     private static async Task<string> CurrentRepoAsync(CancellationToken ct)
     {
-        var r = await Gh.RunAsync(["repo", "view", "--json", "nameWithOwner", "--jq", ".nameWithOwner"], ct);
+        var r = await Gh.RunWithRetryAsync(["repo", "view", "--json", "nameWithOwner", "--jq", ".nameWithOwner"], rateLimitOnly: false, ct);
         if (!r.Ok || string.IsNullOrEmpty(r.StdOut))
             throw new GhException("Cannot determine the repository. Pass --repo OWNER/REPO or run inside a git repo.");
         return r.StdOut;
@@ -188,12 +188,12 @@ internal static class PrSnapshotFetcher
 
     private static async Task<GhPrView> ViewAsync(PrRef pr, CancellationToken ct)
     {
-        var r = await Gh.RunAsync(
+        var r = await Gh.RunWithRetryAsync(
         [
             "pr", "view", pr.Number.ToString(),
             "--repo", pr.Slug,
             "--json", "number,state,headRefOid,body,url,isDraft",
-        ], ct);
+        ], rateLimitOnly: false, ct);
         if (!r.Ok)
             throw new GhException($"Cannot read {pr}: {(string.IsNullOrEmpty(r.StdErr) ? r.StdOut : r.StdErr)}");
 

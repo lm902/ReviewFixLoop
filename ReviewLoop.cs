@@ -107,7 +107,12 @@ internal sealed class ReviewLoop(PrRef pr, LoopOptions options, Func<Cancellatio
 
         while (DateTimeOffset.UtcNow < deadline)
         {
-            var current = await fetch(ct);
+            var current = await PollAsync(ct);
+            if (current is null)
+            {
+                await Task.Delay(options.PollInterval, ct);
+                continue;
+            }
             if (!current.IsOpen) return LoopOutcome.PrClosed;
 
             var result = current.LastCodexResult;
@@ -133,7 +138,13 @@ internal sealed class ReviewLoop(PrRef pr, LoopOptions options, Func<Cancellatio
 
         while (true)
         {
-            var current = await fetch(ct);
+            var current = await PollAsync(ct);
+            if (current is null)
+            {
+                if (DateTimeOffset.UtcNow >= deadline) return LoopOutcome.KiroStalled;
+                await Task.Delay(options.PollInterval, ct);
+                continue;
+            }
             if (!current.IsOpen) return LoopOutcome.PrClosed;
 
             var commitAt = current.LastCommitAt;
@@ -158,6 +169,20 @@ internal sealed class ReviewLoop(PrRef pr, LoopOptions options, Func<Cancellatio
             }
 
             await Task.Delay(options.PollInterval, ct);
+        }
+    }
+
+    /// <summary>A fetch failure mid-wait is not fatal; the next poll can succeed.</summary>
+    private async Task<PrSnapshot?> PollAsync(CancellationToken ct)
+    {
+        try
+        {
+            return await fetch(ct);
+        }
+        catch (GhException ex)
+        {
+            Log($"poll failed, will retry: {ex.Message}");
+            return null;
         }
     }
 
