@@ -9,8 +9,9 @@ internal static partial class Signals
     public const string CodexTrigger = "@codex review";
     public const string KiroTrigger = "/kiro all";
 
-    // A Codex review result always carries this marker; other bot chatter does not.
-    private const string ReviewedCommitMarker = "reviewed commit";
+    // Every Codex verdict carries this heading; queue/failure/quota chatter does not.
+    // The findings-only format omits `Reviewed commit:`, so that marker cannot be required.
+    private static readonly string[] ResultMarkers = ["codex review", "reviewed commit"];
 
     private static readonly string[] CleanPhrases =
     [
@@ -23,8 +24,12 @@ internal static partial class Signals
         string.Equals(login, CodexBotLogin, StringComparison.OrdinalIgnoreCase);
 
     /// <summary>True only for an actual review verdict, not queue/failure/quota chatter.</summary>
-    public static bool IsCodexResult(string? login, string? body) =>
-        IsCodexAuthor(login) && Normalize(body).Contains(ReviewedCommitMarker, StringComparison.Ordinal);
+    public static bool IsCodexResult(string? login, string? body)
+    {
+        if (!IsCodexAuthor(login)) return false;
+        var text = Normalize(body);
+        return ResultMarkers.Any(m => text.Contains(m, StringComparison.Ordinal));
+    }
 
     public static bool IsCleanApproval(string? body)
     {

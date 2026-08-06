@@ -73,7 +73,9 @@ State is derived from four signals in the PR timeline, not from "the last commen
 Comments by unrelated authors are ignored, so a human replying mid-loop cannot derail it.
 
 1. Latest Codex **result** — a `chatgpt-codex-connector[bot]` comment carrying a
-   `Reviewed commit:` marker. Other bot chatter (queued, failed, quota) is not a result.
+   `Codex Review` heading or a `Reviewed commit:` marker. Other bot chatter (queued, failed,
+   quota) is not a result. Both markers are needed because the findings-only format posted
+   as an issue comment omits `Reviewed commit:` entirely, while a clean verdict includes it.
 2. Latest `@codex review` trigger.
 3. Latest `/kiro all` trigger.
 4. Latest commit timestamp.
