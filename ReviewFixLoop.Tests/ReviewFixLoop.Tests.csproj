@@ -21,6 +21,7 @@
     <Compile Include="../Gh.cs" Link="Gh.cs" />
     <Compile Include="../GhJson.cs" Link="GhJson.cs" />
     <Compile Include="../GhRetry.cs" Link="GhRetry.cs" />
+    <Compile Include="../AgentCheck.cs" Link="AgentCheck.cs" />
   </ItemGroup>
 
 </Project>

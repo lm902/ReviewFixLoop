@@ -13,7 +13,7 @@ The Native AOT build is self-contained, so no .NET runtime or SDK is needed to r
 The .NET 10 SDK is only required to build from source.
 
 Both agents must be connected to GitHub, otherwise the loop posts its comments and then
-waits forever because nothing responds:
+waits until the relevant timeout because nothing responds:
 
 - **Codex** — sign in to the repository at
   <https://chatgpt.com/codex/cloud/settings/connectors>. Without it, `@codex review` is
@@ -110,6 +110,26 @@ loop. Codex results are collected from all three endpoints that can carry them �
 Waiting happens in the foreground with a log line per poll. The first poll after a
 trigger is delayed until `trigger time + --initial-delay`; if that moment already
 passed the loop polls immediately.
+
+## Agent readiness check
+
+At startup the run warns, without stopping, if Codex has never commented in the repository:
+
+```
+warning: No Codex activity found in owner/repo. If `@codex review` is never picked up,
+connect the repository at https://chatgpt.com/codex/cloud/settings/connectors
+```
+
+This is a heuristic, not an installation check. A normal OAuth token cannot list GitHub App
+installations — `user/installations` needs an App token, `repos/{repo}/installation` needs an
+App JWT, and `orgs/{org}/installations` needs the `admin:org` scope — so past activity is the
+only signal available. A repository where Codex is installed but has not run yet will produce
+a false warning, which is why the run continues either way.
+
+Kiro is not checked at startup. It pushes commits onto feature branches and never comments,
+so it leaves no repository-wide trace to look for. A missing Kiro surfaces as the
+`--kiro-timeout` expiring, and that message points at
+<https://app.kiro.dev/settings/agent>.
 
 ## Failure handling
 

@@ -185,7 +185,8 @@ internal sealed class ReviewLoop(PrRef pr, LoopOptions options, Func<Cancellatio
             {
                 if (DateTimeOffset.UtcNow >= deadline)
                 {
-                    Log($"No commit from kiro-agent within {Fmt(options.KiroTimeout)}.");
+                    Log($"No commit from kiro-agent within {Fmt(options.KiroTimeout)}. "
+                        + $"Check that Kiro is signed in to GitHub at {AgentCheck.KiroAgentUrl}");
                     return WaitResult.Done(LoopOutcome.KiroStalled);
                 }
                 Log($"waiting for kiro-agent commits, {Remaining(deadline)} left");

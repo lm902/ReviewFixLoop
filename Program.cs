@@ -44,6 +44,7 @@ try
 
     var pr = await PrLookup.ResolveAsync(cli.PrArg, cli.Repo, cts.Token);
     Console.WriteLine($"Driving {pr}{(cli.Options.DryRun ? " (dry run)" : string.Empty)}");
+    await AgentCheck.WarnIfCodexMissingAsync(pr, m => Console.WriteLine($"warning: {m}"), cts.Token);
 
     var loop = new ReviewLoop(pr, cli.Options, ct => PrSnapshotFetcher.FetchAsync(pr, ct));
     var outcome = await loop.RunAsync(cts.Token);
