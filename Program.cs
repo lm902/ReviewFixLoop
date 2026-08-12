@@ -99,7 +99,7 @@ static void PrintUsage() => Console.WriteLine("""
       --initial-delay <n>      Wait before the first poll after a trigger. Default 5.
       --poll-interval <n>      Interval between polls. Default 2.
       --silence-window <n>     Quiet time after a new commit before requesting review. Default 3.
-      --max-rounds <n>         Extra @codex review rounds this run may add. Default 5.
+      --max-rounds <n>         Extra @codex review rounds this run may add. Default 10.
                                Counted on top of rounds already on the PR. 0 posts nothing.
       --round-timeout <n>      Give up waiting for a Codex result. Default 45.
       --kiro-timeout <n>       Give up waiting for kiro-agent commits. Default 30.
@@ -124,7 +124,7 @@ namespace ReviewFixLoop
             var initialDelay = 5.0;
             var pollInterval = 2.0;
             var silenceWindow = 3.0;
-            var maxRounds = 5;
+            var maxRounds = 10;
             var roundTimeout = 45.0;
             var kiroTimeout = 30.0;
             var dryRun = false;

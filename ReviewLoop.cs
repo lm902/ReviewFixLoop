@@ -31,14 +31,19 @@ internal static class LoopPolicy
 
         return newest.Kind switch
         {
-            // A clean-but-stale verdict needs a fresh review of the newer commits.
-            SignalKind.CodexResult when newest.IsClean => LoopAction.TriggerCodex,
+            // A clean-but-stale verdict needs a fresh review, unless one was already requested.
+            SignalKind.CodexResult when newest.IsClean =>
+                HasTriggerSince(s, newest.At) ? LoopAction.WaitForCodex : LoopAction.TriggerCodex,
             SignalKind.CodexResult => LoopAction.TriggerKiro,
             SignalKind.CodexTrigger => LoopAction.WaitForCodex,
             SignalKind.KiroTrigger => LoopAction.WaitForKiro,
             _ => LoopAction.WaitForCodex,
         };
     }
+
+    /// <summary>A trigger at or after <paramref name="at"/> already covers the current head.</summary>
+    private static bool HasTriggerSince(PrSnapshot s, DateTimeOffset at) =>
+        s.LastCodexTrigger is not null && s.LastCodexTrigger.At >= at;
 }
 
 internal sealed class ReviewLoop(PrRef pr, LoopOptions options, Func<CancellationToken, Task<PrSnapshot>> fetch)
@@ -175,6 +180,12 @@ internal sealed class ReviewLoop(PrRef pr, LoopOptions options, Func<Cancellatio
                 var quiet = DateTimeOffset.UtcNow - commitAt.Value;
                 if (quiet >= options.SilenceWindow)
                 {
+                    if (current.LastCodexTrigger?.At > commitAt)
+                    {
+                        Log("A review was already requested for these commits, waiting for the result.");
+                        return WaitResult.Then(LoopAction.WaitForCodex);
+                    }
+
                     Log($"New commits settled ({Fmt(quiet)} quiet), requesting the next review.");
                     // Commits are not timeline signals, so name the next action instead of re-deriving it.
                     return WaitResult.Then(LoopAction.TriggerCodex);

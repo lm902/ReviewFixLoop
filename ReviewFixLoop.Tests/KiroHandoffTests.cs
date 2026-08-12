@@ -42,6 +42,55 @@ public class KiroHandoffTests
         await Assert.ThrowsAsync<DryRunStop>(() => loop.RunAsync(CancellationToken.None));
     }
 
+    /// <summary>A trigger posted while kiro was running already covers the new commits.</summary>
+    [Fact]
+    public async Task ExistingTriggerAfterTheCommitsIsNotDuplicated()
+    {
+        var now = DateTimeOffset.UtcNow;
+        var kiro = new TimelineSignal(SignalKind.KiroTrigger, now.AddMinutes(-10), "/kiro all");
+        var manual = new TimelineSignal(SignalKind.CodexTrigger, now.AddMinutes(-1), "@codex review");
+
+        var loop = new ReviewLoop(Pr, Fast() with { RoundTimeout = TimeSpan.FromMilliseconds(200) }, _ =>
+            Task.FromResult(new PrSnapshot(
+                Head, "OPEN", false,
+                // Observed on PR #424: kiro's commits land, then a trigger is posted by hand.
+                LastCommitAt: now.AddMinutes(-3),
+                LastCodexResult: null,
+                LastCodexTrigger: manual,
+                LastKiroTrigger: kiro,
+                CodexTriggerCount: 1)));
+
+        // Waiting out the existing trigger is correct; posting another one is not.
+        Assert.Equal(LoopOutcome.Timeout, await loop.RunAsync(CancellationToken.None));
+    }
+
+    /// <summary>The kiro handoff must also skip the trigger when one already covers the commits.</summary>
+    [Fact]
+    public async Task HandoffSkipsTheTriggerWhenOneAlreadyCoversTheCommits()
+    {
+        var now = DateTimeOffset.UtcNow;
+        var kiro = new TimelineSignal(SignalKind.KiroTrigger, now.AddMinutes(-10), "/kiro all");
+        var calls = 0;
+
+        var loop = new ReviewLoop(Pr, Fast() with { RoundTimeout = TimeSpan.FromMilliseconds(200) }, _ =>
+        {
+            calls++;
+            // First decision enters WaitForKiro; then a trigger appears after the commits.
+            var manual = calls >= 2
+                ? new TimelineSignal(SignalKind.CodexTrigger, now.AddMinutes(-1), "@codex review")
+                : null;
+            return Task.FromResult(new PrSnapshot(
+                Head, "OPEN", false,
+                LastCommitAt: now.AddMinutes(-3),
+                LastCodexResult: null,
+                LastCodexTrigger: manual,
+                LastKiroTrigger: kiro,
+                CodexTriggerCount: 1));
+        });
+
+        Assert.Equal(LoopOutcome.Timeout, await loop.RunAsync(CancellationToken.None));
+    }
+
     [Fact]
     public async Task RoundLimitStopsTheHandoffInsteadOfSpinning()
     {

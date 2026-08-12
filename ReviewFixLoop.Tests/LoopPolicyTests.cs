@@ -81,4 +81,27 @@ public class LoopPolicyTests
         var s = Snapshot(result: stale, kiroTrigger: Trigger(SignalKind.KiroTrigger, 20));
         Assert.Equal(LoopAction.TriggerCodex, LoopPolicy.Decide(s));
     }
+
+    /// <summary>
+    /// Observed on PR #424: a stale clean verdict arrives after a trigger was already posted.
+    /// Re-triggering there posts a duplicate and can loop, since the verdict's commit never
+    /// catches up to head.
+    /// </summary>
+    [Fact]
+    public void StaleCleanResultDoesNotRetriggerWhenARequestIsAlreadyPending()
+    {
+        var stale = Result(30, clean: true, commit: "9999999aaaabbbbccccddddeeeeffff00001111");
+        var s = Snapshot(result: stale, codexTrigger: Trigger(SignalKind.CodexTrigger, 30));
+
+        Assert.Equal(LoopAction.WaitForCodex, LoopPolicy.Decide(s));
+    }
+
+    [Fact]
+    public void StaleCleanResultRetriggersWhenTheRequestPredatesIt()
+    {
+        var stale = Result(30, clean: true, commit: "9999999aaaabbbbccccddddeeeeffff00001111");
+        var s = Snapshot(result: stale, codexTrigger: Trigger(SignalKind.CodexTrigger, 10));
+
+        Assert.Equal(LoopAction.TriggerCodex, LoopPolicy.Decide(s));
+    }
 }
